@@ -3,74 +3,377 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Web Security Lab</title>
+
+  <title>Security Monitor</title>
 
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #0f172a;
-      color: white;
       font-family: Arial, sans-serif;
+      background: #0b1120;
+      color: #e5e7eb;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: auto;
+    }
+
+    h1 {
+      margin-bottom: 5px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      margin-top: 0;
+    }
+
+    .status {
+      padding: 18px;
+      border-radius: 14px;
+      background: #132e1d;
+      border: 1px solid #22c55e;
+      margin: 20px 0;
+    }
+
+    .status.warning {
+      background: #33250d;
+      border-color: #f59e0b;
+    }
+
+    .status.danger {
+      background: #3a1212;
+      border-color: #ef4444;
+    }
+
+    .status-title {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
     }
 
     .card {
-      width: 90%;
-      max-width: 450px;
-      padding: 30px;
-      text-align: center;
-      border-radius: 18px;
-      background: #1e293b;
+      padding: 18px;
+      border-radius: 14px;
+      background: #111827;
+      border: 1px solid #1f2937;
+    }
+
+    .label {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .value {
+      font-size: 26px;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+
+    .bar-container {
+      margin-top: 20px;
+      background: #111827;
+      padding: 18px;
+      border-radius: 14px;
+    }
+
+    .bar {
+      height: 22px;
+      width: 0%;
+      border-radius: 8px;
+      background: #22c55e;
+      transition: width .3s;
+    }
+
+    .log {
+      margin-top: 20px;
+      background: #020617;
+      border-radius: 14px;
+      padding: 15px;
+      height: 180px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 13px;
     }
 
     button {
-      padding: 12px 20px;
+      margin-top: 15px;
+      padding: 11px 16px;
       border: 0;
-      border-radius: 10px;
+      border-radius: 9px;
       cursor: pointer;
-    }
-
-    #result {
-      margin-top: 20px;
-      color: #cbd5e1;
+      font-weight: bold;
     }
   </style>
 </head>
 
 <body>
 
-  <div class="card">
-    <h1>🛡️ Web Security Lab</h1>
+<div class="container">
 
-    <p>Testing API keamanan website.</p>
+  <h1>🛡️ Security Monitor</h1>
+  <p class="subtitle">
+    Traffic anomaly detection — Web Lab
+  </p>
 
-    <button onclick="testAPI()">
-      Test API
-    </button>
+  <div id="statusBox" class="status">
+    <div id="statusTitle" class="status-title">
+      🟢 NORMAL
+    </div>
 
-    <p id="result">Belum ada request.</p>
+    <div id="statusText">
+      Traffic berada dalam batas normal.
+    </div>
   </div>
 
-  <script>
-    async function testAPI() {
-      const result = document.getElementById("result");
+  <div class="grid">
 
-      result.textContent = "Menghubungi API...";
+    <div class="card">
+      <div class="label">Request terdeteksi</div>
+      <div id="totalRequests" class="value">0</div>
+    </div>
 
-      try {
-        const response = await fetch("/api/test");
-        const data = await response.json();
+    <div class="card">
+      <div class="label">Request / menit</div>
+      <div id="rpm" class="value">0</div>
+    </div>
 
-        result.textContent =
-          `Status: ${response.status} — ${data.message}`;
-      } catch (error) {
-        result.textContent = "API gagal dihubungi.";
-      }
-    }
-  </script>
+    <div class="card">
+      <div class="label">Peak</div>
+      <div id="peak" class="value">0</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Status monitor</div>
+      <div id="monitorStatus" class="value">Aktif</div>
+    </div>
+
+  </div>
+
+  <div class="bar-container">
+
+    <div class="label">
+      Intensitas traffic
+    </div>
+
+    <div style="margin-top:10px">
+      <div id="trafficBar" class="bar"></div>
+    </div>
+
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <button onclick="resetMonitor()">
+    Reset Monitor
+  </button>
+
+</div>
+
+<script>
+
+const LIMIT_NORMAL = 10;
+const LIMIT_WARNING = 25;
+const LIMIT_DANGER = 50;
+
+let totalRequests = 0;
+let peak = 0;
+
+let timestamps = [];
+
+const totalElement =
+  document.getElementById("totalRequests");
+
+const rpmElement =
+  document.getElementById("rpm");
+
+const peakElement =
+  document.getElementById("peak");
+
+const statusBox =
+  document.getElementById("statusBox");
+
+const statusTitle =
+  document.getElementById("statusTitle");
+
+const statusText =
+  document.getElementById("statusText");
+
+const trafficBar =
+  document.getElementById("trafficBar");
+
+const logElement =
+  document.getElementById("log");
+
+
+function addLog(message) {
+
+  const time =
+    new Date().toLocaleTimeString();
+
+  const line =
+    document.createElement("div");
+
+  line.textContent =
+    `[${time}] ${message}`;
+
+  logElement.prepend(line);
+}
+
+
+function registerRequest() {
+
+  const now = Date.now();
+
+  timestamps.push(now);
+
+  totalRequests++;
+
+  if (timestamps.length > 500) {
+    timestamps.shift();
+  }
+
+  updateMonitor();
+}
+
+
+function updateMonitor() {
+
+  const now = Date.now();
+
+  timestamps =
+    timestamps.filter(
+      time => now - time <= 60000
+    );
+
+  const requestsPerMinute =
+    timestamps.length;
+
+  if (requestsPerMinute > peak) {
+    peak = requestsPerMinute;
+  }
+
+  totalElement.textContent =
+    totalRequests;
+
+  rpmElement.textContent =
+    requestsPerMinute;
+
+  peakElement.textContent =
+    peak;
+
+  let percentage =
+    Math.min(
+      (requestsPerMinute / LIMIT_DANGER) * 100,
+      100
+    );
+
+  trafficBar.style.width =
+    percentage + "%";
+
+
+  if (requestsPerMinute >= LIMIT_DANGER) {
+
+    statusBox.className =
+      "status danger";
+
+    statusTitle.textContent =
+      "🔴 ANOMALI TERDETEKSI";
+
+    statusText.textContent =
+      "Lonjakan traffic sangat tinggi.";
+
+    addLog(
+      "WARNING: traffic sangat tinggi."
+    );
+
+  }
+
+  else if (requestsPerMinute >= LIMIT_WARNING) {
+
+    statusBox.className =
+      "status warning";
+
+    statusTitle.textContent =
+      "🟡 TRAFFIC TINGGI";
+
+    statusText.textContent =
+      "Traffic melebihi pola normal.";
+
+  }
+
+  else {
+
+    statusBox.className =
+      "status";
+
+    statusTitle.textContent =
+      "🟢 NORMAL";
+
+    statusText.textContent =
+      "Traffic berada dalam batas normal.";
+
+  }
+}
+
+
+function resetMonitor() {
+
+  totalRequests = 0;
+  peak = 0;
+  timestamps = [];
+
+  totalElement.textContent = "0";
+  rpmElement.textContent = "0";
+  peakElement.textContent = "0";
+
+  trafficBar.style.width = "0%";
+
+  statusBox.className = "status";
+
+  statusTitle.textContent =
+    "🟢 NORMAL";
+
+  statusText.textContent =
+    "Traffic berada dalam batas normal.";
+
+  logElement.innerHTML = "";
+
+  addLog("Monitor di-reset.");
+
+}
+
+
+/*
+  Demo monitor:
+  Mencatat aktivitas halaman secara berkala.
+
+  Ini BUKAN traffic server sebenarnya.
+  Untuk monitoring server sungguhan,
+  data harus berasal dari server/CDN logs.
+*/
+
+setInterval(() => {
+
+  registerRequest();
+
+}, 5000);
+
+
+addLog("Security monitor aktif.");
+
+</script>
 
 </body>
 </html>
